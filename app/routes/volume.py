@@ -7,6 +7,7 @@ from fastapi import APIRouter, Form, HTTPException
 from app.services.volume_service import VolumeEstimator
 from app.utils.file_downloader import download_pcd_to_temp
 from app.config import settings
+import uuid
 import open3d as o3d
 import numpy as np
 import json
@@ -63,9 +64,16 @@ async def estimate_volume(
 
         if not isinstance(roi_data, list):
             raise ValueError("rois must be a list of polygons")
-        
+      
+        output_path = settings.preprocessed_dir / f"{uuid.uuid4()}_preprocessed.pcd"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+         # 如果指定了ROI，同时保存ROI点云
+        for idx, poly in enumerate(roi_data):
+            roi_output_path = output_path.parent / f"{output_path.stem}_roi_{idx}{output_path.suffix}"
+            estimator.save_roi_points_as_pcd(points, poly, str(roi_output_path),0.1, 50)
+        result = estimator.estimate_volumes_with_rois(points, roi_data,0.1, 50)
         # 计算体积
-        result = estimator.estimate_volumes_with_rois(points, roi_data)
+        #result = estimator.estimate_volumes_with_rois(points, roi_data)
         
         return result
 
