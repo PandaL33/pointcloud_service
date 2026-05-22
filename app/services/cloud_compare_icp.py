@@ -430,8 +430,10 @@ class CloudCompareIcp:
             transformed_aligned_cloud = (rotation @ aligned_cloud.T).T + translation
             logger.info(f"配准点云形状: {transformed_aligned_cloud.shape}")
             
+            icp_pcd = o3d.geometry.PointCloud()
+            icp_pcd.points = o3d.utility.Vector3dVector(transformed_aligned_cloud)
             # 保存变换后的点云
-            icp_pcd = self.save_point_cloud(output_path, transformed_aligned_cloud)
+            #icp_pcd = self.save_point_cloud(str(output_path), transformed_aligned_cloud)
 
             total_time = time.time() - start_total_time
             logger.info(f"总耗时: {total_time:.4f}秒")

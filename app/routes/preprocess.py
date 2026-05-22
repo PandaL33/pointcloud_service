@@ -8,7 +8,6 @@ from app.services.file_upload_service import FileUploadService
 from app.utils.file_downloader import download_pcd_to_temp
 from app.config import settings
 import open3d as o3d
-import uuid
 import os
 from pathlib import Path
 from app.services.cloud_compare_icp import CloudCompareIcp
@@ -29,7 +28,7 @@ async def preprocess_endpoint(
         if pcd.is_empty():
             raise ValueError("Empty point cloud")
         
-        uuid_str = str(uuid.uuid4())
+        file_name = os.path.basename(file_url)
         
         if map_file_url:
             map_input = download_pcd_to_temp(map_file_url, settings.max_file_size)
@@ -37,7 +36,7 @@ async def preprocess_endpoint(
             logger.info(f"点云配准,align_cloud:{temp_input},map_cloud:{map_input}")
             if not map_pcd.is_empty():
                 cloud_compare_icp = CloudCompareIcp()
-                icp_pcd_file_path = settings.preprocessed_dir / f"{uuid_str}_icp.pcd"
+                icp_pcd_file_path = settings.preprocessed_dir / f"{file_name}_icp.pcd"
                 transform_matrix, fitness, iterations, icp_pcd = cloud_compare_icp.run_registrator(temp_input, map_input, icp_pcd_file_path,0.25)
                 pcd = icp_pcd
         
@@ -46,7 +45,7 @@ async def preprocess_endpoint(
         preprocessor = PointCloudPreprocessor()
         cleaned = preprocessor.preprocess(pcd)
 
-        output_path = settings.preprocessed_dir / f"{uuid_str}.pcd"
+        output_path = settings.preprocessed_dir / f"{file_name}_preprocessed.pcd"
         if not o3d.io.write_point_cloud(str(output_path), cleaned):
             raise RuntimeError("Save failed")
 
