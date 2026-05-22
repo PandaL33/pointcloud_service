@@ -34,5 +34,9 @@ EXPOSE 10080
 # 设置配置文件服务器URL环境变量（默认值可为空或在运行时覆盖）
 ENV CONFIG_SERVER_URL=""
 
+# 限制 Open3D 底层线程数，防止多进程资源竞争导致卡死
+ENV OMP_NUM_THREADS=1
+ENV OPEN3D_NUM_THREADS=1
+
 # 运行应用程序
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "10080"]
+CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:10080", "--timeout", "120"]

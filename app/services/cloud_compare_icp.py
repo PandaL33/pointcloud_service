@@ -346,13 +346,10 @@ class CloudCompareIcp:
         start_total_time = time.time()
 
         try:
-            # 获取voxel_size参数，如果没有提供则默认为None（不进行降采样）
-            voxel_size = getattr(args, 'voxel_size', None)
-            
             logger.info(f"加载待配准点云: {args.aligned}")
-            # 使用参数传递的voxel_size，如果没有则使用默认值
-            voxel_size = getattr(args, 'voxel_size', 0.1)  # 从args中获取voxel_size参数
             aligned_cloud = self.load_point_cloud(args.aligned, None)
+
+            voxel_size = args.voxel_size  # 从args中获取voxel_size参数，如果没有提供则默认为None（不进行降采样）
             if voxel_size is not None and voxel_size > 0:
                 aligned_cloud_voxel = self.load_point_cloud(args.aligned, voxel_size)
             else:
@@ -467,12 +464,10 @@ class CloudCompareIcp:
             "point_to_plane": True,
             "random_sample_limit": 50000,
             "correspondence_distance": None,
-            "threshold": None
+            "threshold": None,
+            "voxel_size": voxel_size
         }
-        
-        # 添加voxel_size参数到params中，以便registrator方法可以使用
-        params["voxel_size"] = voxel_size
-        
+
         return self.registrator(params)
     
 if __name__ == "__main__":
