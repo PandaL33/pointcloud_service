@@ -371,7 +371,7 @@ class CloudCompareIcp:
 
             # 打印参数
             mode = "点到面 (Point-to-Plane)" if args.point_to_plane else "点到点 (Point-to-Point)"
-            logger.info(f"\n执行 CloudCompare 风格 ICP 配准...")
+            logger.info(f"  执行 CloudCompare 风格 ICP 配准...")
             logger.info(f"  模式: {mode}")
             logger.info(f"  最大迭代次数: {args.max_iterations}")
             logger.info(f"  RMS difference: {args.rms_diff}")
@@ -461,7 +461,7 @@ class CloudCompareIcp:
             "aligned": aligned_file,
             "reference": reference_file,
             "output": output_file,
-            "rms_diff": 1e-5,
+            "rms_diff": 1e-6,
             "max_iterations": 20,
             "overlap": 1.0,
             "point_to_plane": True,

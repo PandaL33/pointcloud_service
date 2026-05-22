@@ -239,7 +239,7 @@ class PointCloudPreprocessor:
             return cropped.select_by_index(np.where(mask)[0])
         else:
             logger.info("未检测到明显天花板,采用裁剪到顶部固定40%")
-            final = self.auto_crop_pointcloud(cropped, x_ratio=0.02, y_ratio=0.02, z_ratio=0.4)
+            final = self.auto_crop_pointcloud(cropped, x_ratio=0.0, y_ratio=0.0, z_ratio=0.4)
             
             return final
    
