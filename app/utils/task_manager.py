@@ -38,26 +38,45 @@ class RedisTaskManager:
         self.task_ttl = task_ttl or settings.redis_task_ttl
         self.key_prefix = "task:status:"
         
-        try:
-            self.redis_client = redis.Redis(
-                host=self.host,
-                port=self.port,
-                db=self.db,
-                password=self.password,
-                decode_responses=True,  # 自动解码字符串
-                socket_connect_timeout=5,
-                socket_timeout=5
-            )
-            logging.info(f"Redis 连接参数: {self.host}:{self.port}/{self.password}")
-            # 测试连接
-            self.redis_client.ping()
-            logger.info(f"Redis 连接成功: {self.host}:{self.port}/{self.db}")
-        except redis.ConnectionError as e:
-            logger.error(f"Redis 连接失败: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Redis 初始化失败: {e}")
-            raise
+        # 延迟初始化 Redis 连接，避免阻塞接口启动
+        self._redis_client = None
+        self._initialized = False
+        
+        logger.info(f"RedisTaskManager 配置: {self.host}:{self.port}/{self.db}")
+    
+    def _ensure_connection(self):
+        """确保 Redis 连接已建立（延迟初始化）"""
+        if self._redis_client is None:
+            try:
+                self._redis_client = redis.Redis(
+                    host=self.host,
+                    port=self.port,
+                    db=self.db,
+                    password=self.password,
+                    decode_responses=True,
+                    socket_connect_timeout=2,  # 缩短连接超时到2秒
+                    socket_timeout=2,          # 缩短操作超时到2秒
+                    retry_on_timeout=True,     # 超时时自动重试
+                    health_check_interval=10,  # 每10秒进行健康检查
+                    max_connections=20         # 连接池最大连接数
+                )
+                # 测试连接
+                self._redis_client.ping()
+                self._initialized = True
+                logger.info(f"Redis 连接成功: {self.host}:{self.port}/{self.db}")
+            except redis.ConnectionError as e:
+                logger.error(f"Redis 连接失败: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Redis 初始化失败: {e}")
+                raise
+        
+        return self._redis_client
+    
+    @property
+    def redis_client(self):
+        """获取 Redis 客户端实例（自动初始化）"""
+        return self._ensure_connection()
     
     def _get_key(self, task_id: str) -> str:
         """获取任务的 Redis key"""

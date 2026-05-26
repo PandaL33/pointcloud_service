@@ -13,12 +13,12 @@ import numpy as np
 import json
 import logging
 import uuid
-import asyncio
+
 from typing import Optional
 
 router = APIRouter()
 
-async def estimate_volume_background_task(
+def estimate_volume_background_task(
     task_id: str,
     file_url: str,
     rois: Optional[str] = None,
@@ -214,20 +214,10 @@ async def estimate_volume_async(
     立即返回 task_id，后台执行处理任务
     """
     task_id = str(uuid.uuid4())
-    task_manager = get_task_manager()
     
-    # 创建初始任务状态
-    task_manager.create_task(task_id, {
-        "task_id": task_id,
-        "status": "accepted",
-        "progress": 0,
-        "message": "任务已接受，准备开始处理",
-        "result": None
-    })
-    
-    # 添加后台任务
+    # 立即返回，将任务创建也放到后台执行
     background_tasks.add_task(
-        estimate_volume_background_task,
+        _create_and_execute_task,
         task_id=task_id,
         file_url=file_url,
         rois=rois,
@@ -239,6 +229,33 @@ async def estimate_volume_async(
         "status": "accepted",
         "message": "任务已接受，正在后台处理"
     }
+
+
+def _create_and_execute_task(
+    task_id: str,
+    file_url: str,
+    rois: Optional[str] = None,
+    grid_size: float = 0.1
+):
+    """在后台创建任务状态并执行体积估算"""
+    task_manager = get_task_manager()
+    
+    # 创建初始任务状态
+    task_manager.create_task(task_id, {
+        "task_id": task_id,
+        "status": "accepted",
+        "progress": 0,
+        "message": "任务已接受，准备开始处理",
+        "result": None
+    })
+    
+    # 执行实际的体积估算任务
+    estimate_volume_background_task(
+        task_id=task_id,
+        file_url=file_url,
+        rois=rois,
+        grid_size=grid_size
+    )
 
 
 @router.get("/estimate_volume/status/{task_id}")

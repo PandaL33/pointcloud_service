@@ -15,12 +15,12 @@ from app.services.cloud_compare_icp import CloudCompareIcp
 router = APIRouter()
 import logging
 import uuid
-import asyncio
+
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-async def preprocess_background_task(
+def preprocess_background_task(
     task_id: str,
     file_url: str,
     map_file_url: Optional[str] = None
@@ -170,8 +170,30 @@ async def preprocess_endpoint_async(
     立即返回 task_id，后台执行处理任务
     """
     task_id = str(uuid.uuid4())
+
+    # 将任务创建和执行都放到后台，避免 Redis 操作阻塞响应
+    background_tasks.add_task(
+        _create_and_execute_task,
+        task_id=task_id,
+        file_url=file_url,
+        map_file_url=map_file_url
+    )
+
+    return {
+        "task_id": task_id,
+        "status": "accepted",
+        "message": "任务已接受，正在后台处理"
+    }
+
+
+def _create_and_execute_task(
+    task_id: str,
+    file_url: str,
+    map_file_url: Optional[str] = None
+):
+    """在后台创建任务状态并执行预处理"""
     task_manager = get_task_manager()
-    
+
     # 创建初始任务状态
     task_manager.create_task(task_id, {
         "task_id": task_id,
@@ -180,20 +202,13 @@ async def preprocess_endpoint_async(
         "message": "任务已接受，准备开始处理",
         "result": None
     })
-    
-    # 添加后台任务
-    background_tasks.add_task(
-        preprocess_background_task,
+
+    # 执行实际的预处理任务
+    preprocess_background_task(
         task_id=task_id,
         file_url=file_url,
         map_file_url=map_file_url
     )
-    
-    return {
-        "task_id": task_id,
-        "status": "accepted",
-        "message": "任务已接受，正在后台处理"
-    }
 
 
 @router.get("/preprocess/status/{task_id}")
