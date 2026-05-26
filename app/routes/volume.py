@@ -73,9 +73,10 @@ async def estimate_volume(
         for idx, poly in enumerate(roi_data):
             roi_output_path = output_path.parent / f"{output_path.stem}_roi_{idx}{output_path.suffix}"
             estimator.save_roi_points_as_pcd(points, poly, str(roi_output_path),0.1, 50)
-        result = estimator.estimate_volumes_with_rois(points, roi_data,0.1, 50)
+        
         # 计算体积
-        #result = estimator.estimate_volumes_with_rois(points, roi_data)
+        result = estimator.estimate_volumes_with_rois(points, roi_data,0.1, 50)
+        logging.info(f"estimate_volumes_with_rois for {file_name}, result: {result}")
         
         return result
 
