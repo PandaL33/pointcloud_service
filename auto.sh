@@ -3,8 +3,16 @@
 export OMP_NUM_THREADS=1
 export OPEN3D_NUM_THREADS=1
 
-# 替换为 Gunicorn 启动命令，-w 4 表示开启 4 个工作进程
-APP="gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:10080 --timeout 120"
+# 替换为 Gunicorn 启动命令
+# -w 4: 开启 4 个工作进程
+# -k uvicorn.workers.UvicornWorker: 使用 Uvicorn worker 支持异步
+# --bind 0.0.0.0:10080: 绑定地址和端口
+# --timeout 300: 超时时间设置为 300 秒（5分钟），适应点云处理等长时间任务
+# --graceful-timeout 300: 优雅关闭超时时间，与 timeout 保持一致
+# --keep-alive 5: 保持连接时间
+# --access-logfile: 访问日志文件
+# --error-logfile: 错误日志文件
+APP="gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:10080 --timeout 300 --graceful-timeout 300 --keep-alive 5"
 LOG="gunicorn.log"
 PIDFILE="gunicorn.pid"
 

@@ -20,7 +20,7 @@ class VolumeEstimator:
             return 0.0
         # global_min_z = np.min(points[:, 2])
         global_min_z = self.detect_ground(points)
-        
+        logger.info(f"地面高度: {global_min_z:.5f}")
         # 处理可能的除零或无穷大
         with np.errstate(divide='ignore', invalid='ignore'):
             gx = np.floor(points[:, 0] / self.grid_size).astype(int)

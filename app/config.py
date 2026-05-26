@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     file_server_url: str = "http://127.0.0.1:10103"
     upload_username: str = "robot-manage"
     upload_password: str = "123456"
+    
+    # Redis 配置
+    redis_host: str = "192.168.200.135"
+    redis_port: int = 6210
+    redis_db: int = 0
+    redis_password: str = "ropeok@2024"
+    redis_task_ttl: int = 86400  # 任务状态过期时间（秒），默认24小时
 
     class Config:
         env_file = ".env"
