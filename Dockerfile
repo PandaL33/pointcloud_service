@@ -2,7 +2,12 @@
 FROM python:3.10.12-slim
 
 # 安装系统依赖，解决libgomp.so.1缺失的问题
-RUN apt-get update && apt-get install -y \
+# 使用国内镜像源加速，使用 --no-install-recommends 减少不必要的依赖下载
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+        sed -i 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libgomp1 \
@@ -11,7 +16,6 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    libgomp1 \
     wget \
     curl \
     && rm -rf /var/lib/apt/lists/*
