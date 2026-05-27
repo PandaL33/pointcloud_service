@@ -151,18 +151,19 @@ def estimate_volume_background_task(
         
         estimator = VolumeEstimator(grid_size=grid_size)
         
-        for idx, poly in enumerate(roi_data):
-            roi_output_path = output_path.parent / f"{output_path.stem}_roi_{idx}{output_path.suffix}"
-            estimator.save_roi_points_as_pcd(points, poly, str(roi_output_path), 0.1, 50)
-            
-            progress = 60 + int((idx + 1) / len(roi_data) * 20)
-            task_manager.update_task(task_id, {
-                "task_id": task_id,
-                "status": "processing",
-                "progress": progress,
-                "message": f"已保存 {idx + 1}/{len(roi_data)} 个ROI点云",
-                "result": None
-            })
+        if settings.save_preprocessed_cloud:
+            for idx, poly in enumerate(roi_data):
+                roi_output_path = output_path.parent / f"{output_path.stem}_roi_{idx}{output_path.suffix}"
+                estimator.save_roi_points_as_pcd(points, poly, str(roi_output_path), 0.1, 50)
+                
+                progress = 60 + int((idx + 1) / len(roi_data) * 20)
+                task_manager.update_task(task_id, {
+                    "task_id": task_id,
+                    "status": "processing",
+                    "progress": progress,
+                    "message": f"已保存 {idx + 1}/{len(roi_data)} 个ROI点云",
+                    "result": None
+                })
         
         # 4. 计算体积
         task_manager.update_task(task_id, {
@@ -327,9 +328,10 @@ async def estimate_volume(
         output_path = settings.preprocessed_dir / f"{file_name}_preprocessed.pcd"
         output_path.parent.mkdir(parents=True, exist_ok=True)
          # 如果指定了ROI，同时保存ROI点云
-        for idx, poly in enumerate(roi_data):
-            roi_output_path = output_path.parent / f"{output_path.stem}_roi_{idx}{output_path.suffix}"
-            estimator.save_roi_points_as_pcd(points, poly, str(roi_output_path),0.1, 50)
+        if settings.save_preprocessed_cloud:
+            for idx, poly in enumerate(roi_data):
+                roi_output_path = output_path.parent / f"{output_path.stem}_roi_{idx}{output_path.suffix}"
+                estimator.save_roi_points_as_pcd(points, poly, str(roi_output_path),0.1, 50)
         
         # 计算体积
         result = estimator.estimate_volumes_with_rois(points, roi_data,0.1, 50)

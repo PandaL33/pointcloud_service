@@ -272,6 +272,12 @@ async def preprocess_endpoint(
         # 上传文件到文件服务器
         uploader = FileUploadService()
         file_id = uploader.upload_file(str(output_path))
+        
+        # 根据配置决定是否删除预处理后的点云文件
+        if not settings.save_point_cloud:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+                logger.info(f"已删除预处理点云文件：{output_path}")
 
         return {"file_id": file_id}
     except Exception as e:

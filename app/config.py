@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str = "ropeok@2024"
     redis_task_ttl: int = 86400  # 任务状态过期时间（秒），默认24小时
+    
+    # 点云保存配置
+    save_point_cloud: bool = False  # 是否保存预处理后的点云文件，默认不保存
 
     class Config:
         env_file = ".env"
