@@ -339,8 +339,7 @@ class VolumeEstimator:
             return float(np.min(boundary_min_z))
 
         # ---- Step 4: 稳健估计地面高度 ----
-        ground_z = np.percentile(ground_candidates, percentile)
-
+        ground_z = float(np.mean(ground_candidates))
         n_boundary = int(np.sum(boundary_mask))
         print(f"  地面检测: 网格单元数={len(cell_min_z)}, "
             f"边界单元数={n_boundary}, "
