@@ -3,6 +3,7 @@
 # Created: 2026-01-27
 # Description: 点云预处理接口
 from fastapi import APIRouter, Form, HTTPException, BackgroundTasks, Query
+from app.services.volume_service import VolumeEstimator
 from app.services.preprocessing_service import PointCloudPreprocessor
 from app.services.file_upload_service import FileUploadService
 from app.utils.file_downloader import download_pcd_to_temp
@@ -39,7 +40,7 @@ def preprocess_background_task(
             "message": "开始处理...",
             "result": None
         })
-        
+        logger.info(f"点云预处理开始")
         # 1. 下载或加载点云文件
         task_manager.update_task(task_id, {
             "task_id": task_id,
@@ -69,8 +70,15 @@ def preprocess_background_task(
             "result": None
         })
         
+        logger.info(f"点云连通性聚类过虑开始")
+        estimator = VolumeEstimator(0.1)
+        ccf_pcd = estimator.connectivity_cluster_filter(pcd)
+        ccf_path = settings.preprocessed_dir / f"{file_name}_cluster.pcd"
+        o3d.io.write_point_cloud(str(ccf_path), ccf_pcd)
+        
         # 2. ICP 配准（如果提供了地图文件）
         if map_file_url:
+            logger.info(f"点云ICP配准开始")
             task_manager.update_task(task_id, {
                 "task_id": task_id,
                 "status": "processing",
@@ -86,11 +94,11 @@ def preprocess_background_task(
                 map_temp_input = map_file_url
                 map_pcd = o3d.io.read_point_cloud(map_file_url)
                   
-            logger.info(f"点云配准,align_cloud:{temp_input},map_cloud:{map_temp_input}")    
+            logger.info(f"点云配准,align_cloud:{ccf_path},map_cloud:{map_temp_input}")    
             if not map_pcd.is_empty():
                 cloud_compare_icp = CloudCompareIcp()
                 icp_pcd_file_path = settings.preprocessed_dir / f"{file_name}_icp.pcd"
-                transform_matrix, fitness, iterations, icp_pcd = cloud_compare_icp.run_registrator(temp_input, map_temp_input, icp_pcd_file_path, 0.25)
+                transform_matrix, fitness, iterations, icp_pcd = cloud_compare_icp.run_registrator(ccf_path, map_temp_input, icp_pcd_file_path, 0.25)
                 pcd = icp_pcd
                 
                 task_manager.update_task(task_id, {
@@ -100,6 +108,8 @@ def preprocess_background_task(
                     "message": f"点云配准完成 (迭代{iterations}次, 适应度:{fitness:.4f})",
                     "result": None
                 })
+        else:
+            pcd = ccf_pcd
         
         # 3. 预处理
         task_manager.update_task(task_id, {
@@ -110,7 +120,7 @@ def preprocess_background_task(
             "result": None
         })
         
-        logger.info(f"点云预处理开始")
+        logger.info(f"点云裁减开始")
         preprocessor = PointCloudPreprocessor()
         cleaned = preprocessor.preprocess(pcd)
 
@@ -130,7 +140,15 @@ def preprocess_background_task(
         # 4. 上传文件到文件服务器
         uploader = FileUploadService()
         file_id = uploader.upload_file(str(output_path))
-        
+        # 根据配置决定是否删除预处理后的点云文件
+        if not settings.save_point_cloud:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+                logger.info(f"已删除预处理点云文件：{output_path}")
+            if os.path.exists(ccf_path):
+                os.unlink(ccf_path)
+                logger.info(f"已删除预处理点云文件：{ccf_path}")
+                
         # 更新任务状态为完成
         task_manager.update_task(task_id, {
             "task_id": task_id,
@@ -232,6 +250,7 @@ async def preprocess_endpoint(
     temp_input = None
     map_temp_input = None
     try:
+        logger.info(f"点云预处理开始")
         if file_url.startswith(('http://', 'https://')):
             temp_input = download_pcd_to_temp(file_url, settings.max_file_size)
             logging.info(f"Downloaded file to: {temp_input}")
@@ -244,7 +263,14 @@ async def preprocess_endpoint(
             pcd = o3d.io.read_point_cloud(file_url)
             file_name = file_url.rsplit('.', 1)[0] 
         
+        logger.info(f"点云连通性聚类过虑开始")
+        estimator = VolumeEstimator(0.1)
+        ccf_pcd = estimator.connectivity_cluster_filter(pcd)
+        ccf_path = settings.preprocessed_dir / f"{file_name}_cluster.pcd"
+        o3d.io.write_point_cloud(str(ccf_path), ccf_pcd)
+        
         if map_file_url:
+            logger.info(f"点云ICP配准开始")
             if map_file_url.startswith(('http://', 'https://')):
                 map_temp_input = download_pcd_to_temp(map_file_url, settings.max_file_size)
                 map_pcd = o3d.io.read_point_cloud(map_temp_input) 
@@ -252,15 +278,16 @@ async def preprocess_endpoint(
                 map_temp_input = map_file_url  # 修复：使用本地文件路径
                 map_pcd = o3d.io.read_point_cloud(map_file_url)
                   
-            logger.info(f"点云配准,align_cloud:{temp_input},map_cloud:{map_temp_input}")    
+            logger.info(f"点云配准,align_cloud:{ccf_path},map_cloud:{map_temp_input}")    
             if not map_pcd.is_empty():
                 cloud_compare_icp = CloudCompareIcp()
                 icp_pcd_file_path = settings.preprocessed_dir / f"{file_name}_icp.pcd"
-                transform_matrix, fitness, iterations, icp_pcd = cloud_compare_icp.run_registrator(temp_input, map_temp_input, icp_pcd_file_path, 0.25)
+                transform_matrix, fitness, iterations, icp_pcd = cloud_compare_icp.run_registrator(ccf_path, map_temp_input, icp_pcd_file_path, 0.25)
                 pcd = icp_pcd   
-        
+        else:
+            pcd = ccf_pcd
         # 预处理
-        logger.info(f"点云预处理开始")
+        logger.info(f"点云裁减开始")
         preprocessor = PointCloudPreprocessor()
         cleaned = preprocessor.preprocess(pcd)
 
@@ -278,6 +305,9 @@ async def preprocess_endpoint(
             if os.path.exists(output_path):
                 os.unlink(output_path)
                 logger.info(f"已删除预处理点云文件：{output_path}")
+            if os.path.exists(ccf_path):
+                os.unlink(ccf_path)
+                logger.info(f"已删除预处理点云文件：{ccf_path}")
 
         return {"file_id": file_id}
     except Exception as e:

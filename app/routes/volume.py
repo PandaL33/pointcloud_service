@@ -104,7 +104,7 @@ def estimate_volume_background_task(
                 "result": None
             })
             
-            estimator = VolumeEstimator(grid_size=grid_size)
+            estimator = VolumeEstimator(grid_size=grid_size, filename=file_name)
             total_vol = estimator.estimate_full_volume(points)
             
             # 更新任务状态为完成
@@ -149,7 +149,7 @@ def estimate_volume_background_task(
         output_path = settings.preprocessed_dir / f"{file_name}_preprocessed.pcd"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        estimator = VolumeEstimator(grid_size=grid_size)
+        estimator = VolumeEstimator(grid_size=grid_size, filename=file_name)
         
         if settings.save_point_cloud:
             for idx, poly in enumerate(roi_data):
@@ -294,7 +294,7 @@ async def estimate_volume(
             raise HTTPException(status_code=400, detail="Empty point cloud")
         
         points = np.asarray(pcd.points)
-        estimator = VolumeEstimator(grid_size=grid_size)
+        estimator = VolumeEstimator(grid_size=grid_size, filename=file_name)
 
         # 不要直接使用 "if not rois"，因为如果 rois 意外变成 numpy 数组会报错
         is_rois_empty = False

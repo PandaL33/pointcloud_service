@@ -5,11 +5,18 @@ from collections import defaultdict
 from typing import List, Optional, Tuple
 from matplotlib.path import Path as MplPath
 import logging
+from app.config import settings
+import uuid
+import CSF
 
 logger = logging.getLogger(__name__)
 class VolumeEstimator:
-    def __init__(self, grid_size: float = 0.1):
+    def __init__(self, grid_size: float = 0.1, filename: str = None):
         self.grid_size = grid_size
+        if filename:
+           self.uuid = filename
+        else:
+           self.uuid = str(uuid.uuid4())
 
     def estimate_full_volume(self, points: np.ndarray) -> float:
         if points.size == 0:
@@ -70,10 +77,13 @@ class VolumeEstimator:
             inside_mask = np.asarray(inside_mask, dtype=bool)
             
             roi_points = points[inside_mask]
-
+            # ground_points, no_ground_points = self.detect_ground_csf(roi_points, output_path)
+            
             if len(roi_points) > 0:
                 roi_pcd = o3d.geometry.PointCloud()
                 roi_pcd.points = o3d.utility.Vector3dVector(roi_points)
+                # SOR滤波，去除地面噪点
+                roi_pcd, inlier_indices = self.sor_filter(roi_pcd)
                 roi_pcd = self.connectivity_cluster_filter(
                     roi_pcd, voxel_size=cluster_voxel_size, min_points_per_component=cluster_min_points_per_component
                 )
@@ -143,6 +153,57 @@ class VolumeEstimator:
             logger.error(f"保存ROI点云时发生错误: {e}")
             return False 
            
+    def sor_filter(self, pcd, nb_neighbors: int = 2, std_ratio: float = 3.0):
+        """
+        Statistical Outlier Removal (SOR) 滤波器。
+
+        基于点邻域距离的统计分析来移除离群噪点:
+        1. 对每个点，计算它到 k 个最近邻的平均距离
+        2. 计算所有点平均距离的均值 (μ) 和标准差 (σ)
+        3. 移除平均距离超过 μ + std_ratio * σ 的点
+
+        这是比半径滤波更稳健的离群点剔除方法，不需要手动指定半径阈值，
+        能自适应点云密度变化。
+
+        参数:
+            pcd: Open3D PointCloud 对象
+            nb_neighbors: 最近邻数量 k，默认为 6
+                - 较小值: 对局部噪点更敏感
+                - 较大值: 更平滑，但计算量更大
+            std_ratio: 标准差倍数阈值，默认为 1.0
+                - 较小值 (如 1.0): 滤波器更激进，移除更多点
+                - 较大值 (如 3.0): 滤波器更保守，仅移除明显离群点
+
+        返回:
+            (filtered_pcd, inlier_indices): 滤波后的点云和保留点的索引数组
+        """
+        if pcd is None or len(pcd.points) == 0:
+            logger.warning("SOR滤波: 输入点云为空")
+            return o3d.geometry.PointCloud(), np.array([], dtype=np.int64)
+
+        if nb_neighbors < 1:
+            nb_neighbors = 1
+
+        n_before = len(pcd.points)
+
+        # 使用 Open3D 内置的统计离群点移除
+        filtered_pcd, inlier_indices = pcd.remove_statistical_outlier(
+            nb_neighbors=nb_neighbors,
+            std_ratio=std_ratio
+        )
+
+        n_after = len(filtered_pcd.points)
+        n_removed = n_before - n_after
+        removed_pct = (n_removed / n_before * 100) if n_before > 0 else 0
+
+        logger.info(
+            f"SOR滤波: 输入={n_before}, 输出={n_after}, "
+            f"移除={n_removed} ({removed_pct:.1f}%), "
+            f"参数: k={nb_neighbors}, std_ratio={std_ratio}"
+        )
+
+        return filtered_pcd, np.asarray(inlier_indices)
+
     def connectivity_cluster_filter(self, pcd, voxel_size=0.1, min_points_per_component=10):
         points = np.asarray(pcd.points)
         if len(points) == 0:
@@ -221,7 +282,7 @@ class VolumeEstimator:
 
         return filtered_pcd
     
-    def detect_ground(self, points: np.ndarray, percentile=50.0):
+    def detect_ground(self, points: np.ndarray):
         """
         基于边缘单元格最小值的地面检测。
 
@@ -237,10 +298,22 @@ class VolumeEstimator:
             - 以最低 20% 为种子,MAD 估计散布,逐步扩展
             - 从下方 3σ 裁剪噪声异常值
         4. 取地面候选集的指定百分位作为最终地面高度
+        
+        参数:
+            points: 点云数据 (N, 3) numpy 数组
+            debug_output_path: 调试输出路径（可选），如果提供则保存调试点云文件
+                - {path}_boundary.pcd: 边界单元点云（红色）
+                - {path}_internal.pcd: 内部单元点云（蓝色）
+                - {path}_ground_candidates.pcd: 地面候选点（绿色）
+                - {path}_full.pcd: 完整标记点云（彩色区分）
         """
         if len(points) == 0:
             return 0.0
-
+        
+        debug_output_path = None
+        if settings.save_point_cloud:  
+            debug_output_path = settings.preprocessed_dir / f"{self.uuid}"
+            
         z_min = np.min(points[:, 2])
         z_max = np.max(points[:, 2])
         z_range = z_max - z_min
@@ -303,6 +376,39 @@ class VolumeEstimator:
         if len(boundary_min_z) < 3:
             boundary_min_z = cell_min_z
 
+        # 调试：标记边界单元和内部单元的点
+        if debug_output_path:
+            # 为每个点标记是边界单元还是内部单元
+            point_cell_key = cell_key.copy()
+            point_is_boundary = np.zeros(len(points), dtype=bool)
+            
+            # 构建 key 到 boundary_mask 的映射
+            key_to_boundary = dict(zip(unique_keys, boundary_mask))
+            for i, k in enumerate(point_cell_key):
+                point_is_boundary[i] = key_to_boundary.get(k, False)
+            
+            # 保存边界单元点云（红色）
+            boundary_pcd = o3d.geometry.PointCloud()
+            boundary_pcd.points = o3d.utility.Vector3dVector(points[point_is_boundary].copy())
+            boundary_colors = np.tile([1.0, 0.0, 0.0], (len(boundary_pcd.points), 1))
+            boundary_pcd.colors = o3d.utility.Vector3dVector(boundary_colors)
+            
+            # 保存内部单元点云（蓝色）
+            internal_pcd = o3d.geometry.PointCloud()
+            internal_pcd.points = o3d.utility.Vector3dVector(points[~point_is_boundary].copy())
+            internal_colors = np.tile([0.0, 0.0, 1.0], (len(internal_pcd.points), 1))
+            internal_pcd.colors = o3d.utility.Vector3dVector(internal_colors)
+            
+            # 保存完整标记点云
+            # full_pcd = o3d.geometry.PointCloud()
+            # full_pcd.points = o3d.utility.Vector3dVector(points.copy())
+            # full_colors = np.zeros((len(points), 3))
+            # full_colors[point_is_boundary] = [1.0, 0.0, 0.0]  # 红色：边界
+            # full_colors[~point_is_boundary] = [0.0, 0.0, 1.0]  # 蓝色：内部
+            # full_pcd.colors = o3d.utility.Vector3dVector(full_colors)
+            
+            logger.info(f"保存调试点云: 边界点={len(boundary_pcd.points)}, 内部点={len(internal_pcd.points)}")
+
         # ---- Step 3: 渐进式稳健估计 ----
         sorted_mins = np.sort(boundary_min_z)
 
@@ -340,10 +446,172 @@ class VolumeEstimator:
 
         # ---- Step 4: 稳健估计地面高度 ----
         ground_z = float(np.mean(ground_candidates))
+
         n_boundary = int(np.sum(boundary_mask))
-        print(f"  地面检测: 网格单元数={len(cell_min_z)}, "
+        logger.info(f"地面检测: 网格单元数={len(cell_min_z)}, "
             f"边界单元数={n_boundary}, "
             f"地面候选数={len(ground_candidates)}, "
-            f"候选Z范围=[{np.min(ground_candidates):.4f}, {np.max(ground_candidates):.4f}]")
+            f"候选Z范围=[{np.min(ground_candidates):.4f}, {np.max(ground_candidates):.4f}], "
+            f"地面高度={ground_z:.4f}")
+
+        # 调试：保存地面候选点
+        if debug_output_path:
+            # 地面候选点是边界单元中 Z 值在候选范围内的点
+            ground_min_z = np.min(ground_candidates)
+            ground_max_z = np.max(ground_candidates)
+            
+            # 找出地面候选点（边界单元且 Z 值在候选范围内）
+            ground_candidate_mask = point_is_boundary & (points[:, 2] >= ground_min_z) & (points[:, 2] <= ground_max_z)
+            
+            # 保存地面候选点云（绿色）
+            ground_pcd = o3d.geometry.PointCloud()
+            ground_pcd.points = o3d.utility.Vector3dVector(points[ground_candidate_mask].copy())
+            ground_colors = np.tile([0.0, 1.0, 0.0], (len(ground_pcd.points), 1))
+            ground_pcd.colors = o3d.utility.Vector3dVector(ground_colors)
+            
+            # 更新完整点云：地面候选点标记为绿色
+            # full_colors[ground_candidate_mask] = [0.0, 1.0, 0.0]  # 绿色：地面候选
+            # full_pcd.colors = o3d.utility.Vector3dVector(full_colors)
+            
+            # 添加地面高度平面可视化（可选）
+            logger.info(f"保存地面候选点: {len(ground_pcd.points)} 个点，地面高度={ground_z:.4f}")
+            
+            # 保存所有调试文件
+            try:
+                o3d.io.write_point_cloud(f"{debug_output_path}_boundary.pcd", boundary_pcd)
+                o3d.io.write_point_cloud(f"{debug_output_path}_internal.pcd", internal_pcd)
+                o3d.io.write_point_cloud(f"{debug_output_path}_ground_candidates.pcd", ground_pcd)
+                # o3d.io.write_point_cloud(f"{debug_output_path}_full.pcd", full_pcd)
+                logger.info(f"调试点云已保存到: {debug_output_path}_*.pcd")
+            except Exception as e:
+                logger.error(f"保存调试点云失败: {e}")
 
         return float(ground_z)
+    
+    def detect_ground_csf(self, points: np.ndarray, 
+                            cloth_resolution: float = 0.5, rigidness: int = 2,
+                            time_step: float = 0.65, class_threshold: float = 0.01,
+                            max_iteration: int = 500) -> float:
+        """
+        使用 CSF (Cloth Simulation Filter) 算法进行地面检测。
+        
+        CSF 是一种基于布料模拟的点云地面滤波算法，通过模拟布料覆盖点云表面的物理过程
+        来区分地面点和非地面点。
+
+        算法原理:
+        1. 将点云倒置，模拟布料从上方覆盖点云
+        2. 布料粒子在重力和内力作用下下落并与点云交互
+        3. 通过迭代达到稳定状态后，根据距离阈值分类地面点
+        
+        参数:
+            points: 点云数据 (N, 3) numpy 数组
+            debug_output_path: 调试输出路径（可选），保存地面和非地面点云
+                - {path}_ground.pcd: 地面点（绿色）
+                - {path}_nonground.pcd: 非地面点（红色）
+                - {path}_all.pcd: 完整标记点云
+            cloth_resolution: 布料网格分辨率（米），控制布料粒子间距
+                - 较小值：更精细，但计算慢
+                - 较大值：更粗糙，但计算快
+                - 建议：点云平均间距的 2-5 倍
+            rigidness: 布料刚性度 (1-3)
+                - 1: 柔软布料，适合复杂地形
+                - 2: 中等刚性，适合一般场景
+                - 3: 刚性布料，适合平坦地面（推荐）
+            time_step: 时间步长 (0.0-1.0)，控制模拟速度
+                - 较大值：收敛快，但可能不稳定
+                - 较小值：收敛慢，但更稳定
+            class_threshold: 分类阈值（米），点到布料的距离小于此值则为地面点
+            max_iteration: 最大迭代次数
+            
+        返回:
+            地面点云，非地面点云
+            
+        参考:
+            Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X., & Yan, G. (2016).
+            An Easy-to-Use Airborne LiDAR Data Filtering Method Based on Cloth Simulation.
+            Remote Sensing, 8(6), 501.
+        """
+        if len(points) == 0:
+            return 0.0
+        debug_output_path = None
+        if settings.save_point_cloud:  
+            debug_output_path = settings.preprocessed_dir / f"{self.uuid}"
+        try:
+            # ---- Step 1: 创建 CSF 对象并设置参数 ----
+            csf_filter = CSF.CSF()
+            
+            # 设置布料参数
+            csf_filter.params.bSloopSmooth = False  # 是否进行平滑处理
+            csf_filter.params.cloth_resolution = cloth_resolution
+            csf_filter.params.rigidness = rigidness
+            csf_filter.params.time_step = time_step
+            csf_filter.params.class_threshold = class_threshold
+            csf_filter.params.interations = max_iteration
+            
+            # ---- Step 2: 设置点云数据 ----
+            # CSF 需要 xyz 坐标的列表格式
+            csf_filter.setPointCloud(points)
+            
+            # ---- Step 3: 执行地面滤波 ----
+            ground_indices = CSF.VecInt()
+            non_ground_indices = CSF.VecInt()
+            csf_filter.do_filtering(ground_indices, non_ground_indices)
+            
+            # 转换为 numpy 数组
+            ground_mask = np.zeros(len(points), dtype=bool)
+            ground_mask[np.array(ground_indices)] = True
+            
+            ground_points = points[ground_mask]
+            non_ground_points = points[~ground_mask]
+            
+            # ---- Step 4: 计算地面高度 ----
+            # if len(ground_points) == 0:
+            #     logger.warning("CSF 未找到地面点，返回最低点 Z 值")
+            #     return float(np.min(points[:, 2]))
+            
+            # # 使用地面点的平均 Z 值作为地面高度
+            # ground_z = float(np.mean(ground_points[:, 2]))
+            
+            # ground_ratio = len(ground_points) / len(points) * 100
+            # logger.info(f"CSF 地面检测: 总点数={len(points)}, "
+            #            f"地面点={len(ground_points)} ({ground_ratio:.1f}%), "
+            #            f"非地面点={len(non_ground_points)}, "
+            #            f"地面高度={ground_z:.4f}")
+            
+            # ---- Step 5: 调试输出（可选）----
+            if debug_output_path:
+                try:
+                    # 地面点云（绿色）
+                    ground_pcd = o3d.geometry.PointCloud()
+                    ground_pcd.points = o3d.utility.Vector3dVector(ground_points.copy())
+                    ground_colors = np.tile([0.0, 1.0, 0.0], (len(ground_points), 1))
+                    ground_pcd.colors = o3d.utility.Vector3dVector(ground_colors)
+                    
+                    # 非地面点云（红色）
+                    nonground_pcd = o3d.geometry.PointCloud()
+                    nonground_pcd.points = o3d.utility.Vector3dVector(non_ground_points.copy())
+                    nonground_colors = np.tile([1.0, 0.0, 0.0], (len(non_ground_points), 1))
+                    nonground_pcd.colors = o3d.utility.Vector3dVector(nonground_colors)
+                    
+                    # 完整标记点云
+                    full_pcd = o3d.geometry.PointCloud()
+                    full_pcd.points = o3d.utility.Vector3dVector(points.copy())
+                    full_colors = np.zeros((len(points), 3))
+                    full_colors[ground_mask] = [0.0, 1.0, 0.0]  # 绿色：地面
+                    full_colors[~ground_mask] = [1.0, 0.0, 0.0]  # 红色：非地面
+                    full_pcd.colors = o3d.utility.Vector3dVector(full_colors)
+                    
+                    # 保存 PCD 文件
+                    o3d.io.write_point_cloud(f"{debug_output_path}_ground.pcd", ground_pcd)
+                    o3d.io.write_point_cloud(f"{debug_output_path}_nonground.pcd", nonground_pcd)
+                    o3d.io.write_point_cloud(f"{debug_output_path}_all.pcd", full_pcd)
+                    
+                    logger.info(f"CSF 调试点云已保存到: {debug_output_path}_*.pcd")
+                except Exception as e:
+                    logger.error(f"保存 CSF 调试点云失败: {e}")
+            
+            return ground_points, non_ground_points
+            
+        except Exception as e:
+            logger.error(f"CSF 地面检测失败: {e}")
+            return None, points

@@ -418,7 +418,7 @@ class CloudCompareIcp:
             else:
                 base_name = os.path.splitext(os.path.basename(args.aligned))[0]
                 dir_name = os.path.dirname(args.aligned)
-                output_path = os.path.join(dir_name, f"{base_name}_registered.pcd")
+                output_path = os.path.join(dir_name, f"{base_name}_icp.pcd")
 
             output_dir = os.path.dirname(output_path)
             if output_dir and not os.path.exists(output_dir):

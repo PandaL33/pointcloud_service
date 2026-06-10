@@ -5,3 +5,4 @@ __pycache__/
 # Logs and PIDs
 *.log
 *.pid
+*.pcd

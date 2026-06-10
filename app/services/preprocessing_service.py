@@ -191,12 +191,12 @@ class PointCloudPreprocessor:
         return base_int
     
     def preprocess(self, pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
-        voxel_down_pcd=pcd.voxel_down_sample(voxel_size=0.1)
+        #voxel_down_pcd=pcd.voxel_down_sample(voxel_size=0.1)
         # 1. 投影滤波：提取各个平面的“密集骨架”
         # 注意：这里的 min_points_per_cell 非常关键，设得太高会导致 filtered 为空
-        filtered_xz = self.projection_outlier_removal(voxel_down_pcd, plane='xz', grid_size=0.1, min_points_per_cell=10)
-        filtered_xy = self.projection_outlier_removal(voxel_down_pcd, plane='xy', grid_size=0.1, min_points_per_cell=10)
-        filtered_yz = self.projection_outlier_removal(voxel_down_pcd, plane='yz', grid_size=0.1, min_points_per_cell=10)
+        filtered_xz = self.projection_outlier_removal(pcd, plane='xz', grid_size=0.1, min_points_per_cell=10)
+        filtered_xy = self.projection_outlier_removal(pcd, plane='xy', grid_size=0.1, min_points_per_cell=10)
+        filtered_yz = self.projection_outlier_removal(pcd, plane='yz', grid_size=0.1, min_points_per_cell=10)
         
         # 2. 根据骨架计算包围盒，裁剪原图
         # 这一步去除了外围的大片噪点
@@ -209,7 +209,7 @@ class PointCloudPreprocessor:
         # 1. 使用 RANSAC 寻找水平面
         # 注意：这里可能会拟合到地面，也可能会拟合到天花板
         # distance_threshold 可以适当调大，比如 0.1 (10cm)，因为天花板可能不平
-        plane_model, inliers = voxel_down_pcd.segment_plane(distance_threshold=0.1,
+        plane_model, inliers = pcd.segment_plane(distance_threshold=0.1,
                                                      ransac_n=3,
                                                      num_iterations=500)
         
