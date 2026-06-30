@@ -308,6 +308,7 @@ class CloudCompareIcp:
             file_path: 点云文件路径
             voxel_size: 体素大小，如果提供则进行体素下采样以减少点的数量，提高处理效率
         """
+        file_path = str(file_path)
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"点云文件不存在: {file_path}")
         pcd = o3d.io.read_point_cloud(file_path)
