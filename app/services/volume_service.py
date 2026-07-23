@@ -7,7 +7,6 @@ from matplotlib.path import Path as MplPath
 import logging
 from app.config import settings
 import uuid
-import CSF
 
 logger = logging.getLogger(__name__)
 class VolumeEstimator:
@@ -77,7 +76,6 @@ class VolumeEstimator:
             inside_mask = np.asarray(inside_mask, dtype=bool)
             
             roi_points = points[inside_mask]
-            # ground_points, no_ground_points = self.detect_ground_csf(roi_points, output_path)
             
             if len(roi_points) > 0:
                 roi_pcd = o3d.geometry.PointCloud()
@@ -487,131 +485,3 @@ class VolumeEstimator:
                 logger.error(f"保存调试点云失败: {e}")
 
         return float(ground_z)
-    
-    def detect_ground_csf(self, points: np.ndarray, 
-                            cloth_resolution: float = 0.5, rigidness: int = 2,
-                            time_step: float = 0.65, class_threshold: float = 0.01,
-                            max_iteration: int = 500) -> float:
-        """
-        使用 CSF (Cloth Simulation Filter) 算法进行地面检测。
-        
-        CSF 是一种基于布料模拟的点云地面滤波算法，通过模拟布料覆盖点云表面的物理过程
-        来区分地面点和非地面点。
-
-        算法原理:
-        1. 将点云倒置，模拟布料从上方覆盖点云
-        2. 布料粒子在重力和内力作用下下落并与点云交互
-        3. 通过迭代达到稳定状态后，根据距离阈值分类地面点
-        
-        参数:
-            points: 点云数据 (N, 3) numpy 数组
-            debug_output_path: 调试输出路径（可选），保存地面和非地面点云
-                - {path}_ground.pcd: 地面点（绿色）
-                - {path}_nonground.pcd: 非地面点（红色）
-                - {path}_all.pcd: 完整标记点云
-            cloth_resolution: 布料网格分辨率（米），控制布料粒子间距
-                - 较小值：更精细，但计算慢
-                - 较大值：更粗糙，但计算快
-                - 建议：点云平均间距的 2-5 倍
-            rigidness: 布料刚性度 (1-3)
-                - 1: 柔软布料，适合复杂地形
-                - 2: 中等刚性，适合一般场景
-                - 3: 刚性布料，适合平坦地面（推荐）
-            time_step: 时间步长 (0.0-1.0)，控制模拟速度
-                - 较大值：收敛快，但可能不稳定
-                - 较小值：收敛慢，但更稳定
-            class_threshold: 分类阈值（米），点到布料的距离小于此值则为地面点
-            max_iteration: 最大迭代次数
-            
-        返回:
-            地面点云，非地面点云
-            
-        参考:
-            Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X., & Yan, G. (2016).
-            An Easy-to-Use Airborne LiDAR Data Filtering Method Based on Cloth Simulation.
-            Remote Sensing, 8(6), 501.
-        """
-        if len(points) == 0:
-            return 0.0
-        debug_output_path = None
-        if settings.save_point_cloud:  
-            debug_output_path = settings.preprocessed_dir / f"{self.uuid}"
-        try:
-            # ---- Step 1: 创建 CSF 对象并设置参数 ----
-            csf_filter = CSF.CSF()
-            
-            # 设置布料参数
-            csf_filter.params.bSloopSmooth = False  # 是否进行平滑处理
-            csf_filter.params.cloth_resolution = cloth_resolution
-            csf_filter.params.rigidness = rigidness
-            csf_filter.params.time_step = time_step
-            csf_filter.params.class_threshold = class_threshold
-            csf_filter.params.interations = max_iteration
-            
-            # ---- Step 2: 设置点云数据 ----
-            # CSF 需要 xyz 坐标的列表格式
-            csf_filter.setPointCloud(points)
-            
-            # ---- Step 3: 执行地面滤波 ----
-            ground_indices = CSF.VecInt()
-            non_ground_indices = CSF.VecInt()
-            csf_filter.do_filtering(ground_indices, non_ground_indices)
-            
-            # 转换为 numpy 数组
-            ground_mask = np.zeros(len(points), dtype=bool)
-            ground_mask[np.array(ground_indices)] = True
-            
-            ground_points = points[ground_mask]
-            non_ground_points = points[~ground_mask]
-            
-            # ---- Step 4: 计算地面高度 ----
-            # if len(ground_points) == 0:
-            #     logger.warning("CSF 未找到地面点，返回最低点 Z 值")
-            #     return float(np.min(points[:, 2]))
-            
-            # # 使用地面点的平均 Z 值作为地面高度
-            # ground_z = float(np.mean(ground_points[:, 2]))
-            
-            # ground_ratio = len(ground_points) / len(points) * 100
-            # logger.info(f"CSF 地面检测: 总点数={len(points)}, "
-            #            f"地面点={len(ground_points)} ({ground_ratio:.1f}%), "
-            #            f"非地面点={len(non_ground_points)}, "
-            #            f"地面高度={ground_z:.4f}")
-            
-            # ---- Step 5: 调试输出（可选）----
-            if debug_output_path:
-                try:
-                    # 地面点云（绿色）
-                    ground_pcd = o3d.geometry.PointCloud()
-                    ground_pcd.points = o3d.utility.Vector3dVector(ground_points.copy())
-                    ground_colors = np.tile([0.0, 1.0, 0.0], (len(ground_points), 1))
-                    ground_pcd.colors = o3d.utility.Vector3dVector(ground_colors)
-                    
-                    # 非地面点云（红色）
-                    nonground_pcd = o3d.geometry.PointCloud()
-                    nonground_pcd.points = o3d.utility.Vector3dVector(non_ground_points.copy())
-                    nonground_colors = np.tile([1.0, 0.0, 0.0], (len(non_ground_points), 1))
-                    nonground_pcd.colors = o3d.utility.Vector3dVector(nonground_colors)
-                    
-                    # 完整标记点云
-                    full_pcd = o3d.geometry.PointCloud()
-                    full_pcd.points = o3d.utility.Vector3dVector(points.copy())
-                    full_colors = np.zeros((len(points), 3))
-                    full_colors[ground_mask] = [0.0, 1.0, 0.0]  # 绿色：地面
-                    full_colors[~ground_mask] = [1.0, 0.0, 0.0]  # 红色：非地面
-                    full_pcd.colors = o3d.utility.Vector3dVector(full_colors)
-                    
-                    # 保存 PCD 文件
-                    o3d.io.write_point_cloud(f"{debug_output_path}_ground.pcd", ground_pcd)
-                    o3d.io.write_point_cloud(f"{debug_output_path}_nonground.pcd", nonground_pcd)
-                    o3d.io.write_point_cloud(f"{debug_output_path}_all.pcd", full_pcd)
-                    
-                    logger.info(f"CSF 调试点云已保存到: {debug_output_path}_*.pcd")
-                except Exception as e:
-                    logger.error(f"保存 CSF 调试点云失败: {e}")
-            
-            return ground_points, non_ground_points
-            
-        except Exception as e:
-            logger.error(f"CSF 地面检测失败: {e}")
-            return None, points
